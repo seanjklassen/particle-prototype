@@ -5,12 +5,7 @@
   --foreground: #666;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* Removed unsupported @theme block to avoid linter warnings */
 
 @media (prefers-color-scheme: dark) {
   :root {
@@ -51,6 +46,15 @@ body {
   font-weight: 420;
   font-variation-settings: "wght" 420;
   font-size: 17px;
+}
+
+/* Bottom viewport gradual blur utility (masked backdrop blur) */
+.blur-fade-bottom {
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(36px) saturate(1.1) brightness(1.02);
+  backdrop-filter: blur(36px) saturate(1.1) brightness(1.02);
+  -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,1), rgba(0,0,0,0.4), rgba(0,0,0,0));
+  mask-image: linear-gradient(to top, rgba(0,0,0,1), rgba(0,0,0,0.4), rgba(0,0,0,0));
 }
 
 @keyframes floatY {

@@ -129,7 +129,7 @@ export default function HeroChipsToButton(): React.ReactElement {
       // Control spend automatically → Expense management, Accounting automations, Invoicing
       { ids: ["expense", "accounting", "company"], start: 0.14, end: 0.28 },
       // Fund growth intelligently → Capital, Insights
-      { ids: ["capital", "insights"], start: 0.28, end: 0.42 },
+      { ids: ["capital", "insights"], start: 0.26, end: 0.40 },
     ];
 
     // Slightly delay the first two chips to better match particle coalescence
@@ -188,7 +188,7 @@ export default function HeroChipsToButton(): React.ReactElement {
     let raf = 0;
     const g1 = { start: 0.00, end: 0.14 };
     const g2 = { start: 0.14, end: 0.28 };
-    const g3 = { start: 0.28, end: 0.42 };
+    const g3 = { start: 0.26, end: 0.40 };
     const explodeStart = 0.68;
     const ctaLineStart = 0.92; // start earlier so the final line fully fades in by p=1
 
@@ -206,15 +206,32 @@ export default function HeroChipsToButton(): React.ReactElement {
 
     const tick = () => {
       const p = progressRef.current;
-      const a0 = windowAlpha(p, g1.start, g1.end); // Move money quickly
-      const a1 = windowAlpha(p, g2.start, g2.end); // Control spend automatically
-      const a2 = windowAlpha(p, g3.start, g3.end); // Fund growth intelligently
-      // Line 4: In one platform designed to be → appears around explosion, then fades before line 5
-      let a3 = 0;
+      // Precompute platform/explosion transitions for reuse
       const platformInStart = explodeStart - 0.02;
       const platformInEnd = explodeStart + 0.06;
       const platformHoldEnd = Math.min(0.93, ctaLineStart - 0.04);
       const platformOutEnd = Math.max(platformHoldEnd + 0.03, ctaLineStart - 0.01);
+
+      const a0 = windowAlpha(p, g1.start, g1.end); // Move money quickly
+      const a1 = windowAlpha(p, g2.start, g2.end); // Control spend automatically
+      // Custom monotonic sequence for line 3 (Fund growth intelligently)
+      const inS3 = g3.start;
+      const inE3 = g3.start + (g3.end - g3.start) * 0.25;
+      const holdEnd3 = Math.max(g3.end, platformInStart - 0.01);
+      let a2 = 0;
+      if (p <= inS3) {
+        a2 = 0;
+      } else if (p < inE3) {
+        a2 = easeInOutCubic((p - inS3) / Math.max(0.0001, inE3 - inS3));
+      } else if (p < holdEnd3) {
+        a2 = 1;
+      } else if (p < explodeStart) {
+        a2 = 1 - easeInOutCubic((p - holdEnd3) / Math.max(0.0001, explodeStart - holdEnd3));
+      } else {
+        a2 = 0;
+      }
+      // Line 4: In one platform designed to be → appears around explosion, then fades before line 5
+      let a3 = 0;
       if (p < platformInStart) {
         a3 = 0;
       } else if (p < platformInEnd) {
@@ -226,6 +243,7 @@ export default function HeroChipsToButton(): React.ReactElement {
       } else {
         a3 = 0;
       }
+      // (a2 now fully monotonic; no additional blending needed)
       let a4 = 0; // Greater than the sum of its parts
       if (p >= ctaLineStart && p < ctaLineStart + 0.08) {
         a4 = easeInOutCubic((p - ctaLineStart) / 0.08);
@@ -311,6 +329,9 @@ export default function HeroChipsToButton(): React.ReactElement {
         {/* CTA button positioned where particles coalesce. Rendered relative to stage to avoid container offset */}
         <CTAOverlay progressRef={progressRef} ctaRef={ctaRef} />
 
+        {/* Bottom gradual blur overlay */}
+        <div className="pointer-events-none fixed left-0 right-0 bottom-0 h-64 blur-fade-bottom z-[60]" />
+
         <div className="relative z-10 mx-auto flex h-full max-w-5xl flex-col items-center justify-center px-6 text-center">
         <h1
           data-hero-headline
@@ -334,30 +355,30 @@ export default function HeroChipsToButton(): React.ReactElement {
         {/* Floating chips placed around headline */}
         <div className="pointer-events-none absolute inset-0">
           {/* top center */}
-          <div className="absolute left-1/2 top-[14%] -translate-x-1/2">
+          <div className="absolute left-1/2 top-[12%] -translate-x-1/2">
             <ChipEl chip={chips[0]} className="" />
           </div>
           {/* right upper */}
-          <div className="absolute right-[16%] top-[22%]">
+          <div className="absolute right-[3%] top-[20%]">
             <ChipEl chip={chips[1]} className="" />
           </div>
-          <div className="absolute right-[10%] top-[45%]">
+          <div className="absolute right-[2%] top-[48%]">
             <ChipEl chip={chips[2]} className="chip-float-b" />
           </div>
           {/* left mid */}
-          <div className="absolute left-[8%] top-[44%]">
+          <div className="absolute left-[2%] top-[42%]">
             <ChipEl chip={chips[3]} className="chip-float-b" />
           </div>
-          <div className="absolute left-[28%] top-[60%]">
+          <div className="absolute left-[18%] top-[63%]">
             <ChipEl chip={chips[4]} className="" />
           </div>
-          <div className="absolute right-[22%] top-[60%]">
+          <div className="absolute right-[6%] top-[63%]">
             <ChipEl chip={chips[5]} className="" />
           </div>
-          <div className="absolute left-[32%] top-[26%]">
+          <div className="absolute left-[20%] top-[22%]">
             <ChipEl chip={chips[6]} className="" />
           </div>
-          <div className="absolute left-1/2 top-[74%] -translate-x-1/2">
+          <div className="absolute left-1/2 top-[78%] -translate-x-1/2">
             <ChipEl chip={chips[7]} className="" />
           </div>
         </div>
@@ -385,7 +406,7 @@ function CTAOverlay({
     const tick = () => {
       const p = progressRef.current;
       // Fade in between 0.95 → 1
-      const t = Math.max(0, Math.min(1, (p - 0.95) / 0.05));
+      const t = Math.max(0, Math.min(1, (p - 0.88) / 0.08));
       const nextOpacity = t;
       const { x, y, w, h, r } = ctaRef.current;
       setOpacity(nextOpacity);
@@ -412,7 +433,7 @@ function CTAOverlay({
         href="#"
         className="pointer-events-auto inline-flex h-full w-full items-center justify-center rounded-full bg-white/80 px-6 text-zinc-900 shadow-sm ring-1 ring-black/10 backdrop-blur hover:bg-white arcadia-text-17"
       >
-        Explore Demo
+        Launch Demo
       </a>
     </div>
   );

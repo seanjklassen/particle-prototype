@@ -23,6 +23,8 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
   const actorRef = useRef(14000); // portion that participates in morph (brighter/denser)
   const cssSizeRef = useRef<{ w: number; h: number }>({ w: 1, h: 1 });
   const headCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const lastProgressRef = useRef(0);
+  const lastActiveMsRef = useRef<number>(performance.now());
 
   // Compute target points for CTA rounded rect using a relaxed grid
   const ctaTargets = useMemo(() => {
@@ -32,7 +34,15 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     for (let y = ctaRect.y + spacing / 2; y <= ctaRect.y + ctaRect.h - spacing / 2; y += spacing) {
       for (let x = ctaRect.x + spacing / 2; x <= ctaRect.x + ctaRect.w - spacing / 2; x += spacing) {
         if (insideRoundRect(x, y, ctaRect)) {
-          pts.push(x, y);
+          // Add slight jitter so CTA target points are not in a strict grid
+          const j = 2.2;
+          const jx = x + rand(-j, j);
+          const jy = y + rand(-j, j);
+          if (insideRoundRect(jx, jy, ctaRect)) {
+            pts.push(jx, jy);
+          } else {
+            pts.push(x, y);
+          }
         }
       }
     }
@@ -51,9 +61,21 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       const tPts: number[] = [];
       for (let y = r.y + spacingTarget / 2; y <= r.y + r.h - spacingTarget / 2; y += spacingTarget) {
         for (let x = r.x + spacingTarget / 2; x <= r.x + r.w - spacingTarget / 2; x += spacingTarget) {
-          if (insideRoundRect(x, y, r)) tPts.push(x, y);
+          if (insideRoundRect(x, y, r)) {
+            // Add jitter to chip target positions for a looser cluster
+            const j = 1.8;
+            const jx = x + rand(-j, j);
+            const jy = y + rand(-j, j);
+            if (insideRoundRect(jx, jy, r)) {
+              tPts.push(jx, jy);
+            } else {
+              tPts.push(x, y);
+            }
+          }
         }
       }
+      // Shuffle to avoid scanline ordering artifacts
+      shuffleXY(tPts);
       targets.push(new Float32Array(tPts));
 
       const sPts: number[] = [];
@@ -150,14 +172,13 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
         const cx = headBox ? (headBox.left - stageBox.left + headBox.width/2) : stage.clientWidth/2;
         const cy = headBox ? (headBox.top - stageBox.top + headBox.height/2)  : stage.clientHeight/2;
         headCenterRef.current = { x: cx, y: cy };
-        const radius = Math.min(stage.clientWidth, stage.clientHeight) * 0.48;
         const cloudPts: number[] = [];
         const cloudCols: number[] = [];
+        // Full-stage rectangular scatter
         for(let i=0;i<pool;i++){
-          const u = Math.random();
-          const rr = radius * Math.sqrt(u);
-          const a = Math.random()*Math.PI*2.0;
-          cloudPts.push(cx + Math.cos(a)*rr + rand(-1,1), cy + Math.sin(a)*rr + rand(-1,1));
+          const x = Math.random() * stage.clientWidth;
+          const y = Math.random() * stage.clientHeight;
+          cloudPts.push(x + rand(-1,1), y + rand(-1,1));
           const isWhite = Math.random() < 0.85;
           const c = isWhite ? [0.92,0.94,0.96] : [0.10,0.11,0.12];
           cloudCols.push(c[0], c[1], c[2]);
@@ -225,7 +246,7 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
         actStarts[writeIdx * 2 + 1] = chipS[siS + 1];
         writeIdx++;
       }
-      // cloud: swirl around headline center (use CTA center as temporary anchor if headline not used)
+      // cloud: full-stage rectangular scatter (use headline center for auxiliary uniforms only)
       const stage = stageRef.current!;
       const stageBox = stage.getBoundingClientRect();
       const headBox = headlineRef.current?.getBoundingClientRect();
@@ -235,15 +256,11 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       headCenterRef.current = { x: cx, y: cy };
       const cloudPts: number[] = [];
       const cloudCols: number[] = [];
-      const radius = Math.min(stage.clientWidth, stage.clientHeight) * 0.48; // larger cloud
       for(let i=0;i<cloud;i++){
-        // Uniform disk (not a ring): r = R * sqrt(u)
-        const u = Math.random();
-        const rr = radius * Math.sqrt(u);
-        const a = Math.random()*Math.PI*2.0;
-        cloudPts.push(cx + Math.cos(a)*rr + rand(-1,1), cy + Math.sin(a)*rr + rand(-1,1));
-        // mix of dark grey and white (mostly dark)
-        const isWhite = Math.random() < 0.65;
+        const x = Math.random() * stage.clientWidth;
+        const y = Math.random() * stage.clientHeight;
+        cloudPts.push(x + rand(-1,1), y + rand(-1,1));
+        const isWhite = Math.random() < 0.85;
         const c = isWhite ? [0.92,0.94,0.96] : [0.10,0.11,0.12];
         cloudCols.push(c[0], c[1], c[2]);
       }
@@ -314,6 +331,28 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       // Use CSS pixel size for coordinate mapping
       gl.uniform2f(uResolution, cssSizeRef.current.w, cssSizeRef.current.h);
       gl.drawArrays(gl.POINTS, 0, poolRef.current);
+
+      // Dynamic opacity: hide until start, fade near CTA, and fade out when idle
+      const pNow = progress;
+      const startThresh = 0.002;
+      const visibleAlpha = pNow < 0.95 ? 1 : Math.max(0, 1 - (pNow - 0.95) / 0.05);
+      const baseAlpha = pNow > startThresh ? visibleAlpha : 0;
+      const nowMs = performance.now();
+      const delta = Math.abs(pNow - lastProgressRef.current);
+      if (delta > 0.0005) {
+        lastActiveMsRef.current = nowMs;
+      }
+      lastProgressRef.current = pNow;
+      const idleMs = nowMs - lastActiveMsRef.current;
+      const idleHoldMs = 150; // fully visible for a short time after scroll stops
+      const idleFadeMs = 600; // then fade out
+      let activityAlpha = 1;
+      if (idleMs > idleHoldMs) {
+        const t = Math.min(1, (idleMs - idleHoldMs) / idleFadeMs);
+        activityAlpha = 1 - t;
+      }
+      const finalAlpha = Math.max(0, Math.min(1, baseAlpha * activityAlpha));
+      if (canvas) canvas.style.opacity = String(finalAlpha);
     };
     raf = requestAnimationFrame(render);
 
@@ -401,6 +440,10 @@ void main(){
     float gEnd = uGEnd.z;
     if (chipIndex <= g0endIdx) { gStart = uGStart.x; gEnd = uGEnd.x; }
     else if (chipIndex <= g1endIdx) { gStart = uGStart.y; gEnd = uGEnd.y; }
+    // Before a chip group's window starts, bias the initial burst position toward the loose cloud
+    // so non-active chip clusters look looser at the very beginning
+    float pre = 1.0 - smoothstep(gStart, gStart + 0.06, uT);
+    burstPos = mix(burstPos, aTargetCloud, pre * 0.85);
     // Local progress with per-chip staggering inside its group's window
     float groupIndex = chipIndex;
     if (chipIndex > g0endIdx) groupIndex = chipIndex - g0count; // normalize to group-local index
@@ -415,8 +458,9 @@ void main(){
     float eWin = min(gEnd, baseE + 0.04);
     float local = clamp((uT - s) / max(0.0001, (eWin - s)), 0.0, 1.0);
     float tChipPhase = smoothstep(0.0, 1.0, local);
-    float tCTAphase  = clamp((uT - 0.78)/0.17, 0.0, 1.0); // 0.78→0.95
-    // Pre-CTA explosion window: send chips back to cloud together
+    // Start CTA coalescence slightly before explosion fully finishes for a more natural handoff
+    float tCTAphase  = clamp((uT - 0.70)/0.21, 0.0, 1.0); // 0.74→0.95
+    // Explosion window
     float tExplode = clamp((uT - 0.68)/0.10, 0.0, 1.0); // 0.68→0.78
 
     // Critically damped spring toward staged targets (reserved for future tuning)
@@ -427,11 +471,22 @@ void main(){
     float tChipPhaseIdle = clamp(tChipPhase + idle, 0.0, 1.0);
     // Outline-first bias for chip formation
     float edgeBias = smoothstep(0.0, 0.6, tChipPhase);
-    vec2 tgtChip = mix(burstPos, tChip, tChipPhaseIdle);
-    // During explosion, move from chip back toward cloud
-    vec2 chipToCloud = mix(tgtChip, tCloud, tExplode);
+    // Add slight per-frame jitter so clusters look less grid-aligned
+    // Chip jitter fades during explosion and CTA phases
+    float chipJamp = 1.9 * (1.0 - tExplode) * (1.0 - tCTAphase);
+    vec2 jChip = vec2(sin(uTick*1.31 + seed*4.07), cos(uTick*1.53 + seed*3.71)) * chipJamp;
+    vec2 tChipJ = tChip + jChip;
+    // CTA jitter is smaller and damps as CTA settles
+    float ctaJamp = 1.1 * (1.0 - tCTAphase);
+    vec2 jCTA = vec2(sin(uTick*1.87 + seed*2.31), cos(uTick*2.11 + seed*5.13)) * ctaJamp;
+    vec2 tCTAJ = tCTA + jCTA;
+
+    vec2 tgtChip = mix(burstPos, tChipJ, tChipPhaseIdle);
+    // During explosion, move from chip back toward cloud; diminish explosion as CTA phase grows
+    float explodeFactor = tExplode * (1.0 - 0.6 * tCTAphase);
+    vec2 chipToCloud = mix(tgtChip, tCloud, explodeFactor);
     // Then from exploded cloud to CTA formation
-    vec2 tgt = mix(chipToCloud, tCTA, tCTAphase);
+    vec2 tgt = mix(chipToCloud, tCTAJ, tCTAphase);
     pos = mix(burstPos, tgt, max(max(tChipPhaseIdle, tExplode), tCTAphase));
     pos += normalize(vec2(0.0001,0.0001) + (tgt - pos)) * (1.0-edgeBias) * 2.0;
   } else {
@@ -450,7 +505,7 @@ void main(){
   // Size and alpha scale with proximity
   float d = length(aTargetCTA - pos);
   float alpha = clamp(1.0 - d/140.0, 0.85, 1.0);
-  gl_PointSize = 7.2; // larger particles
+  gl_PointSize = 5.2; // larger particles
   vColor = vec4(aColor, alpha);
 }`;
 
