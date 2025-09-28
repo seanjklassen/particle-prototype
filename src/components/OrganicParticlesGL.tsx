@@ -20,7 +20,7 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
   const glRef = useRef<WebGL2RenderingContext | null>(null);
   const buffersReadyRef = useRef(false);
   const poolRef = useRef(16000); // total particles
-  const actorRef = useRef(6000); // portion that participates in morph
+  const actorRef = useRef(14000); // portion that participates in morph (brighter/denser)
   const cssSizeRef = useRef<{ w: number; h: number }>({ w: 1, h: 1 });
   const headCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -67,7 +67,7 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     return { targets, starts };
   }, [chipRects]);
 
-  // Init GL once
+  // Init GL (rebuild when geometry/targets change, not on scroll)
   useEffect(() => {
     const canvas = canvasRef.current;
     const stage = stageRef.current;
@@ -91,7 +91,19 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     resize();
 
     const program = buildProgram(gl, VERT_SRC, FRAG_SRC);
-      gl.useProgram(program);
+    // Validate shader program
+    const vsOk = gl.getShaderParameter((program as any)._vs ?? null, gl.COMPILE_STATUS);
+    const fsOk = gl.getShaderParameter((program as any)._fs ?? null, gl.COMPILE_STATUS);
+    const prOk = gl.getProgramParameter(program, gl.LINK_STATUS);
+    if (!prOk) {
+      // eslint-disable-next-line no-console
+      console.error("WebGL program link error:", gl.getProgramInfoLog(program));
+    }
+    gl.useProgram(program);
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
       
     const aStart = gl.getAttribLocation(program, "aStart");
     const aTargetChip = gl.getAttribLocation(program, "aTargetChip");
@@ -104,6 +116,11 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     const uTick = gl.getUniformLocation(program, "uTick");
     const uNumChips = gl.getUniformLocation(program, "uNumChips");
     const uHeadCenter = gl.getUniformLocation(program, "uHeadCenter");
+    // Grouped chip gating uniforms
+    const uGStart = gl.getUniformLocation(program, "uGStart");
+    const uGEnd = gl.getUniformLocation(program, "uGEnd");
+    const uGCount = gl.getUniformLocation(program, "uGCount");
+    const uLate = gl.getUniformLocation(program, "uLate");
 
     // Allocate buffers (will fill on each measure)
     const startBuf = gl.createBuffer();
@@ -113,16 +130,66 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     const colorBuf = gl.createBuffer();
 
     // Set static enable
-    gl.enableVertexAttribArray(aStart);
-    gl.enableVertexAttribArray(aTargetChip);
-    gl.enableVertexAttribArray(aTargetCTA);
-    gl.enableVertexAttribArray(aTargetCloud);
-    gl.enableVertexAttribArray(aColor);
+    if (aStart !== -1) gl.enableVertexAttribArray(aStart);
+    if (aTargetChip !== -1) gl.enableVertexAttribArray(aTargetChip);
+    if (aTargetCTA !== -1) gl.enableVertexAttribArray(aTargetCTA);
+    if (aTargetCloud !== -1) gl.enableVertexAttribArray(aTargetCloud);
+    if (aColor !== -1) gl.enableVertexAttribArray(aColor);
+
+    const dataKeyRef = { current: "" } as React.MutableRefObject<string>;
+
+    const makeKey = () => `${ctaTargets.length}|${perChipSamples.targets.length}|${perChipSamples.starts.length}`;
 
     const fillBuffers = () => {
-      if (!ctaTargets.length || !perChipSamples.targets.length) return;
+      // If targets not ready yet, fill with a pure cloud so something renders
+      if (!ctaTargets.length || !perChipSamples.targets.length) {
+        const pool = poolRef.current;
+        const stage = stageRef.current!;
+        const stageBox = stage.getBoundingClientRect();
+        const headBox = headlineRef.current?.getBoundingClientRect();
+        const cx = headBox ? (headBox.left - stageBox.left + headBox.width/2) : stage.clientWidth/2;
+        const cy = headBox ? (headBox.top - stageBox.top + headBox.height/2)  : stage.clientHeight/2;
+        headCenterRef.current = { x: cx, y: cy };
+        const radius = Math.min(stage.clientWidth, stage.clientHeight) * 0.48;
+        const cloudPts: number[] = [];
+        const cloudCols: number[] = [];
+        for(let i=0;i<pool;i++){
+          const u = Math.random();
+          const rr = radius * Math.sqrt(u);
+          const a = Math.random()*Math.PI*2.0;
+          cloudPts.push(cx + Math.cos(a)*rr + rand(-1,1), cy + Math.sin(a)*rr + rand(-1,1));
+          const isWhite = Math.random() < 0.85;
+          const c = isWhite ? [0.92,0.94,0.96] : [0.10,0.11,0.12];
+          cloudCols.push(c[0], c[1], c[2]);
+        }
+        const cloudArr = new Float32Array(cloudPts);
+        const cloudColsArr = new Float32Array(cloudCols);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, startBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cloudArr, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(aStart, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, targetChipBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cloudArr, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(aTargetChip, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, targetCtaBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cloudArr, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(aTargetCTA, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, targetCloudBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cloudArr, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(aTargetCloud, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, colorBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cloudColsArr, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+        buffersReadyRef.current = true;
+        dataKeyRef.current = makeKey();
+        return;
+      }
       const pool = poolRef.current;
-      const actors = Math.min(actorRef.current, Math.max(1000, Math.floor(pool*0.4)));
+      const actors = Math.min(actorRef.current, Math.max(1000, Math.floor(pool*0.75)));
       const cloud = pool - actors;
       // actors: assign evenly per chip in sequence for gating windows
       const numChips = Math.max(1, perChipSamples.targets.length);
@@ -130,7 +197,7 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       const actTargetsChip = new Float32Array(actors * 2);
       const actTargetsCTA = tileTo(actors, ctaTargets);
       const actStarts = new Float32Array(actors * 2);
-      const actColors  = buildMixedColors(actors, 0.65); // 65% white, 35% dark
+      const actColors  = buildMixedColors(actors, 0.85); // 85% white, 15% dark
       let writeIdx = 0;
       for (let i = 0; i < numChips; i++) {
         const chipT = perChipSamples.targets[i];
@@ -212,20 +279,37 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
 
       buffersReadyRef.current = true;
+      dataKeyRef.current = makeKey();
     };
 
-    fillBuffers();
+    // Defer fill one rAF to let layout settle
+    requestAnimationFrame(() => fillBuffers());
 
     let raf = 0;
     const render = () => {
       raf = requestAnimationFrame(render);
+      // If geometry/targets changed (e.g., measurements settled), refill buffers
+      const currentKey = `${ctaTargets.length}|${perChipSamples.targets.length}|${perChipSamples.starts.length}`;
+      if (currentKey !== dataKeyRef.current) {
+        fillBuffers();
+      }
       if (!buffersReadyRef.current) return;
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
+      // Set grouped gating to align with UI chip fade windows: [0.00–0.14], [0.14–0.28], [0.28–0.42]
+      if (uGStart) gl.uniform3f(uGStart, 0.00, 0.14, 0.28);
+      if (uGEnd) gl.uniform3f(uGEnd, 0.14, 0.28, 0.42);
+      // Dynamically match actual chip count to avoid mismatches when rects are not all measured
+      const chipCount = Math.max(0, chipRects.length);
+      const g0 = Math.min(3, chipCount);
+      const g1 = Math.min(3, Math.max(0, chipCount - g0));
+      const g2 = Math.max(0, chipCount - g0 - g1);
+      if (uGCount) gl.uniform3f(uGCount, g0, g1, g2);
+      if (uLate) gl.uniform1f(uLate, 0.6);
       gl.uniform1f(uTime, progress);
       gl.uniform1f(uSplit, actorRef.current);
       gl.uniform1f(uTick, performance.now()*0.001);
-      gl.uniform1f(uNumChips, Math.max(1, chipRects.length));
+      gl.uniform1f(uNumChips, Math.max(1, perChipSamples.targets.length));
       gl.uniform2f(uHeadCenter, headCenterRef.current.x, headCenterRef.current.y);
       // Use CSS pixel size for coordinate mapping
       gl.uniform2f(uResolution, cssSizeRef.current.w, cssSizeRef.current.h);
@@ -236,23 +320,25 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      gl.deleteBuffer(startBuf!);
-        gl.deleteBuffer(targetChipBuf!);
-        gl.deleteBuffer(targetCtaBuf!);
-      gl.deleteBuffer(targetCloudBuf!);
-      gl.deleteBuffer(colorBuf!);
-      gl.deleteProgram(program!);
+      if (startBuf) gl.deleteBuffer(startBuf);
+      if (targetChipBuf) gl.deleteBuffer(targetChipBuf);
+      if (targetCtaBuf) gl.deleteBuffer(targetCtaBuf);
+      if (targetCloudBuf) gl.deleteBuffer(targetCloudBuf);
+      if (colorBuf) gl.deleteBuffer(colorBuf);
+      if (program) gl.deleteProgram(program);
     };
-  }, [stageRef, ctaTargets, perChipSamples, chipRects, progress]);
+  }, [stageRef, ctaTargets, perChipSamples, chipRects]);
 
   // Fade out GL layer as CTA appears
   const style: React.CSSProperties = useMemo(() => {
     const p = progress;
-    const alpha = p < 0.95 ? 1 : Math.max(0, 1 - (p - 0.95) / 0.05);
+    const startThresh = 0.002; // hide until user actually starts scrolling
+    const visibleAlpha = p < 0.95 ? 1 : Math.max(0, 1 - (p - 0.95) / 0.05);
+    const alpha = p > startThresh ? visibleAlpha : 0;
     return { opacity: alpha, transition: 'opacity 120ms linear' };
   }, [progress]);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={style} />;
+  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={style} aria-hidden={style.opacity === 0} />;
 }
 
 // ========== Shaders ==========
@@ -269,6 +355,11 @@ uniform float uSplit; // number of actor particles (rest are cloud)
 uniform float uTick;  // time for cloud swirl
 uniform float uNumChips; // number of chips for staggered gating
 uniform vec2 uHeadCenter;
+// Grouped gating: three windows and counts
+uniform vec3 uGStart; // start times for groups 1..3
+uniform vec3 uGEnd;   // end times for groups 1..3
+uniform vec3 uGCount; // counts per group (e.g., 3,3,2)
+uniform float uLate;  // late factor to delay per-chip coalescence inside window
 out vec4 vColor;
 
 // Hash noise
@@ -295,34 +386,53 @@ void main(){
     vec2 tChip = aTargetChip;
     vec2 tCTA = aTargetCTA;
     vec2 tCloud = aTargetCloud;
-    // Staggered per-chip gating across timeline 0.12→0.72
+    // Grouped per-chip gating aligned to UI windows
     float chips = max(1.0, uNumChips);
-    float chipStart = 0.12;
-    float chipEnd = 0.72;
-    float chipSpan = max(0.001, chipEnd - chipStart);
-    float phase = clamp((uT - chipStart) / chipSpan, 0.0, 1.0);
-    float activeFloat = floor(phase * chips - 0.001);
     float actorsPerChip = max(1.0, floor(uSplit / chips));
-    float group = floor(float(gl_VertexID) / actorsPerChip);
-    float prior = step(group, activeFloat - 0.5);
-    float isCurrent = step(abs(group - (activeFloat + 0.0)), 0.5);
-    float localT = clamp(fract(phase * chips), 0.0, 1.0);
-    float tChipPhase = clamp(prior + isCurrent * smoothstep(0.0, 1.0, localT), 0.0, 1.0);
+    float chipIndex = floor(float(gl_VertexID) / actorsPerChip);
+    // Determine which group this chipIndex belongs to using uGCount
+    float g0count = max(1.0, uGCount.x);
+    float g1count = max(1.0, uGCount.y);
+    float g2count = max(1.0, uGCount.z);
+    float g0endIdx = g0count - 1.0;
+    float g1endIdx = g0count + g1count - 1.0;
+    // default to group2
+    float gStart = uGStart.z;
+    float gEnd = uGEnd.z;
+    if (chipIndex <= g0endIdx) { gStart = uGStart.x; gEnd = uGEnd.x; }
+    else if (chipIndex <= g1endIdx) { gStart = uGStart.y; gEnd = uGEnd.y; }
+    // Local progress with per-chip staggering inside its group's window
+    float groupIndex = chipIndex;
+    if (chipIndex > g0endIdx) groupIndex = chipIndex - g0count; // normalize to group-local index
+    if (chipIndex > g1endIdx) groupIndex = chipIndex - (g0count + g1count);
+    float gCount = g2count; // default
+    if (chipIndex <= g0endIdx) gCount = g0count; else if (chipIndex <= g1endIdx) gCount = g1count;
+    gCount = max(1.0, gCount);
+    float window = max(0.0001, (gEnd - gStart));
+    float baseS = gStart + (groupIndex / gCount) * window;
+    float baseE = gStart + ((groupIndex + 1.0) / gCount) * window;
+    float s = mix(baseS, baseE, uLate);
+    float eWin = min(gEnd, baseE + 0.04);
+    float local = clamp((uT - s) / max(0.0001, (eWin - s)), 0.0, 1.0);
+    float tChipPhase = smoothstep(0.0, 1.0, local);
     float tCTAphase  = clamp((uT - 0.78)/0.17, 0.0, 1.0); // 0.78→0.95
     // Pre-CTA explosion window: send chips back to cloud together
     float tExplode = clamp((uT - 0.68)/0.10, 0.0, 1.0); // 0.68→0.78
 
-    // Critically damped spring toward staged targets
+    // Critically damped spring toward staged targets (reserved for future tuning)
     float k = 2.0;
-    float e = exp(-k*(1.0 - (1.0 - t2)*(1.0 - t2)));
+    // Idle drift to keep motion alive even when scroll stops
+    float idleAmp = 0.015 * (1.0 - tExplode) * (1.0 - tCTAphase);
+    float idle = idleAmp * sin(uTick*0.8 + chipIndex*1.37);
+    float tChipPhaseIdle = clamp(tChipPhase + idle, 0.0, 1.0);
     // Outline-first bias for chip formation
     float edgeBias = smoothstep(0.0, 0.6, tChipPhase);
-    vec2 tgtChip = mix(burstPos, tChip, tChipPhase);
+    vec2 tgtChip = mix(burstPos, tChip, tChipPhaseIdle);
     // During explosion, move from chip back toward cloud
     vec2 chipToCloud = mix(tgtChip, tCloud, tExplode);
     // Then from exploded cloud to CTA formation
     vec2 tgt = mix(chipToCloud, tCTA, tCTAphase);
-    pos = mix(burstPos, tgt, max(max(tChipPhase, tExplode), tCTAphase));
+    pos = mix(burstPos, tgt, max(max(tChipPhaseIdle, tExplode), tCTAphase));
     pos += normalize(vec2(0.0001,0.0001) + (tgt - pos)) * (1.0-edgeBias) * 2.0;
   } else {
     // Background cloud gentle drift (avoid ring look): small radial breathing + slow swirl
@@ -339,8 +449,8 @@ void main(){
 
   // Size and alpha scale with proximity
   float d = length(aTargetCTA - pos);
-  float alpha = clamp(1.0 - d/120.0, 0.25, 1.0);
-  gl_PointSize = 3.8; // larger particles
+  float alpha = clamp(1.0 - d/140.0, 0.85, 1.0);
+  gl_PointSize = 7.2; // larger particles
   vColor = vec4(aColor, alpha);
 }`;
 
@@ -359,7 +469,20 @@ void main(){
 function buildProgram(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string){
   const vs = gl.createShader(gl.VERTEX_SHADER)!; gl.shaderSource(vs, vertSrc); gl.compileShader(vs);
   const fs = gl.createShader(gl.FRAGMENT_SHADER)!; gl.shaderSource(fs, fragSrc); gl.compileShader(fs);
+  if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+    // eslint-disable-next-line no-console
+    console.error('Vertex shader compile error:', gl.getShaderInfoLog(vs));
+  }
+  if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+    // eslint-disable-next-line no-console
+    console.error('Fragment shader compile error:', gl.getShaderInfoLog(fs));
+  }
   const program = gl.createProgram()!; gl.attachShader(program, vs); gl.attachShader(program, fs); gl.linkProgram(program);
+  ;(program as any)._vs = vs; ;(program as any)._fs = fs;
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    // eslint-disable-next-line no-console
+    console.error('Program link error:', gl.getProgramInfoLog(program));
+  }
   return program;
 }
 

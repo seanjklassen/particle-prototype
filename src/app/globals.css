@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #F6F5F2;
+  --foreground: #666;
 }
 
 @theme inline {
@@ -14,14 +14,43 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: ##F6F5F2;
+    --foreground: #666;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/* Arcadia variable fonts */
+@font-face {
+  font-family: "Arcadia Display";
+  src: url("/fonts/ArcadiaDisplay-VariableVF.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Arcadia Text";
+  src: url("/fonts/ArcadiaText-VariableVF.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Utility classes for Arcadia usage */
+.arcadia-display {
+  font-family: "Arcadia Display", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-weight: 480;
+  font-variation-settings: "wght" 480;
+}
+.arcadia-text-17 {
+  font-family: "Arcadia Text", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-weight: 420;
+  font-variation-settings: "wght" 420;
+  font-size: 17px;
 }
 
 @keyframes floatY {

@@ -20,14 +20,14 @@ type Chip = {
 export default function HeroChipsToButton(): React.ReactElement {
   const chips: Chip[] = useMemo(
     () => [
-      { id: "banking", label: "Banking" },
+      { id: "banking", label: "Business Banking" },
       { id: "payments", label: "Payments" },
-      { id: "company", label: "Company cards" },
-      { id: "personal", label: "Personal banking" },
+      { id: "company", label: "Invoicing" },
+      { id: "personal", label: "Company cards" },
       { id: "accounting", label: "Accounting automations" },
       { id: "expense", label: "Expense management" },
       { id: "capital", label: "Capital" },
-      { id: "invoicing", label: "Invoicing" },
+      { id: "insights", label: "Insights" },
     ],
     []
   );
@@ -37,6 +37,17 @@ export default function HeroChipsToButton(): React.ReactElement {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const headlineRef = useRef<HTMLHeadingElement | null>(null);
+  const headlineLines = useMemo(
+    () => [
+      "Move money quickly",
+      "Control spend automatically",
+      "Fund growth intelligently",
+      "In one platform designed to be",
+      "Greater than the sum of its parts",
+    ],
+    []
+  );
+  const lineRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const [ctaState, setCtaState] = useState<{ x: number; y: number; w: number; h: number; r: number } | null>(null);
   const chipRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const [mounted, setMounted] = useState(false);
@@ -81,8 +92,8 @@ export default function HeroChipsToButton(): React.ReactElement {
       const rect = headline.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
       const centerX = rect.left - containerRect.left + rect.width / 2;
-      const baseY = rect.top - containerRect.top + rect.height + 32; // 32px below headline
-      const w = 280, h = 64, r = 16;
+      const baseY = rect.top - containerRect.top + rect.height + 32 + 32; // 104px below headline (32 + 72 offset)
+      const w = 280, h = 64, r = h / 2;
       const rectCta = { x: centerX - w / 2, y: baseY - h / 2, w, h, r };
       ctaRef.current = rectCta;
       setCtaState(rectCta);
@@ -102,61 +113,137 @@ export default function HeroChipsToButton(): React.ReactElement {
 
   // Removed old canvas utilities (GL handles drawing)
 
-  // Sequential chip fade-in mirroring GL chip clustering timeline
+  // Grouped chip fade-in aligned to headline sequencing
   useEffect(() => {
     if (!mounted) return;
     let raf = 0;
-    const ids = chips.map((c) => c.id);
-    const chipStart = 0.12; // shader gating start
-    const chipEnd = 0.72;   // shader gating end
-    const explodeStart = 0.68; // shader explosion start
-    const explodeEnd = 0.78;   // shader explosion end
-    const preExplodeFadeLead = 0.04; // chips finish fading before explosion begins
+    const explodeStart = 0.68;
+    const explodeEnd = 0.78;
+    const preExplodeFadeLead = 0.06;
     const hideStart = Math.max(0, explodeStart - preExplodeFadeLead);
     const hideEnd = explodeStart;
-    const span = Math.max(0.001, chipEnd - chipStart);
+
+    const groups: Array<{ ids: string[]; start: number; end: number }> = [
+      // Move money quickly → Business Banking (banking), Company cards (personal), Payments (payments)
+      { ids: ["banking", "personal", "payments"], start: 0.00, end: 0.14 },
+      // Control spend automatically → Expense management, Accounting automations, Invoicing
+      { ids: ["expense", "accounting", "company"], start: 0.14, end: 0.28 },
+      // Fund growth intelligently → Capital, Insights
+      { ids: ["capital", "insights"], start: 0.28, end: 0.42 },
+    ];
+
+    // Slightly delay the first two chips to better match particle coalescence
+    const extraDelayById: Record<string, number> = {
+      banking: 0.05,
+      personal: 0.05,
+    };
+
+    const timelineById: Record<string, { start: number; end: number; idx: number; count: number }> = {};
+    groups.forEach((g) => {
+      const count = g.ids.length;
+      g.ids.forEach((id, idx) => {
+        const s = g.start + (idx / count) * (g.end - g.start);
+        const e = g.start + ((idx + 1) / count) * (g.end - g.start);
+        timelineById[id] = { start: s, end: e, idx, count };
+      });
+    });
+
     const tick = () => {
       const p = progressRef.current;
-      const n = Math.max(1, ids.length);
-      for (let i = 0; i < n; i++) {
-        const el = chipRefs.current[ids[i]];
-        if (!el) continue;
-        const w0 = chipStart + (i / n) * span;
-        const w1 = chipStart + ((i + 1) / n) * span;
-        // Delay fade into the latter portion of the chip window
-        const lateFactor = 0.7;  // start fade at 70% through the chip's window
-        const postPad = 0.04;    // allow a small overrun after the window
-        const f0 = w0 + (w1 - w0) * lateFactor;
-        const f1 = Math.min(chipEnd - 0.02, w1 + postPad);
+      chips.forEach((c) => {
+        const el = chipRefs.current[c.id];
+        if (!el) return;
+        const tl = (timelineById as any)[c.id];
+        if (!tl) {
+          el.style.opacity = "0";
+          return;
+        }
+        const lateFactor = 0.6;
+        const extra = extraDelayById[c.id] ?? 0;
+        const start = tl.start + (tl.end - tl.start) * lateFactor + extra;
+        const end = Math.min(tl.end + 0.04 + extra, groups[groups.length - 1].end);
         let alpha = 0;
-        if (p <= f0) {
-          alpha = 0;
-        } else if (p >= f1) {
-          alpha = 1;
-        } else {
-          alpha = easeInOutCubic((p - f0) / Math.max(0.0001, f1 - f0));
-        }
+        if (p <= start) alpha = 0;
+        else if (p >= end) alpha = 1;
+        else alpha = easeInOutCubic((p - start) / Math.max(0.0001, end - start));
 
-        // Pre-explosion fade: chips fade out completely before particles move to cloud
+        // Pre-explosion fade
         let fadeOutFactor = 1;
-        if (p <= hideStart) {
-          fadeOutFactor = 1;
-        } else if (p >= hideEnd) {
-          fadeOutFactor = 0;
-        } else {
-          const tfo = (p - hideStart) / Math.max(0.0001, (hideEnd - hideStart));
-          fadeOutFactor = 1 - easeInOutCubic(tfo);
-        }
-        // After explosion, keep hidden
+        if (p <= hideStart) fadeOutFactor = 1;
+        else if (p >= hideEnd) fadeOutFactor = 0;
+        else fadeOutFactor = 1 - easeInOutCubic((p - hideStart) / Math.max(0.0001, hideEnd - hideStart));
         if (p >= explodeStart) fadeOutFactor = 0;
-        alpha = Math.min(alpha, fadeOutFactor);
-        el.style.opacity = String(alpha);
-      }
+
+        el.style.opacity = String(Math.min(alpha, fadeOutFactor));
+      });
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [mounted, chips]);
+
+  // Headline sequencing aligned to chip groups and later phases
+  useEffect(() => {
+    if (!mounted) return;
+    let raf = 0;
+    const g1 = { start: 0.00, end: 0.14 };
+    const g2 = { start: 0.14, end: 0.28 };
+    const g3 = { start: 0.28, end: 0.42 };
+    const explodeStart = 0.68;
+    const ctaLineStart = 0.92; // start earlier so the final line fully fades in by p=1
+
+    const windowAlpha = (p: number, s: number, e: number) => {
+      const inS = s;
+      const inE = s + (e - s) * 0.25;
+      const outS = e - (e - s) * 0.20;
+      const outE = e;
+      if (p <= inS) return 0;
+      if (p < inE) return easeInOutCubic((p - inS) / Math.max(0.0001, inE - inS));
+      if (p < outS) return 1;
+      if (p < outE) return 1 - easeInOutCubic((p - outS) / Math.max(0.0001, outE - outS));
+      return 0;
+    };
+
+    const tick = () => {
+      const p = progressRef.current;
+      const a0 = windowAlpha(p, g1.start, g1.end); // Move money quickly
+      const a1 = windowAlpha(p, g2.start, g2.end); // Control spend automatically
+      const a2 = windowAlpha(p, g3.start, g3.end); // Fund growth intelligently
+      // Line 4: In one platform designed to be → appears around explosion, then fades before line 5
+      let a3 = 0;
+      const platformInStart = explodeStart - 0.02;
+      const platformInEnd = explodeStart + 0.06;
+      const platformHoldEnd = Math.min(0.93, ctaLineStart - 0.04);
+      const platformOutEnd = Math.max(platformHoldEnd + 0.03, ctaLineStart - 0.01);
+      if (p < platformInStart) {
+        a3 = 0;
+      } else if (p < platformInEnd) {
+        a3 = easeInOutCubic((p - platformInStart) / Math.max(0.0001, platformInEnd - platformInStart));
+      } else if (p < platformHoldEnd) {
+        a3 = 1;
+      } else if (p < platformOutEnd) {
+        a3 = 1 - easeInOutCubic((p - platformHoldEnd) / Math.max(0.0001, platformOutEnd - platformHoldEnd));
+      } else {
+        a3 = 0;
+      }
+      let a4 = 0; // Greater than the sum of its parts
+      if (p >= ctaLineStart && p < ctaLineStart + 0.08) {
+        a4 = easeInOutCubic((p - ctaLineStart) / 0.08);
+      } else if (p >= ctaLineStart + 0.08) {
+        a4 = 1;
+      }
+
+      const alphas = [a0, a1, a2, a3, a4];
+      for (let i = 0; i < headlineLines.length; i++) {
+        const el = lineRefs.current[i];
+        if (!el) continue;
+        el.style.opacity = String(alphas[i] ?? 0);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [mounted, headlineLines]);
 
   // Chip decorator
   const ChipEl = ({ chip, className }: { chip: Chip; className: string }) => (
@@ -165,7 +252,7 @@ export default function HeroChipsToButton(): React.ReactElement {
         chipRefs.current[chip.id] = el;
       }}
       className={
-        "select-none inline-flex items-center gap-2 rounded-full bg-white/70 backdrop-blur px-4 py-2 text-sm text-zinc-900 shadow-sm ring-1 ring-black/10 chip-float-a will-change-transform " +
+        "select-none inline-flex items-center gap-2 rounded-full bg-white/70 backdrop-blur px-4 py-2 text-zinc-900 shadow-sm ring-1 ring-black/10 chip-float-a will-change-transform arcadia-text-17 " +
         className
       }
       style={{
@@ -183,7 +270,7 @@ export default function HeroChipsToButton(): React.ReactElement {
   return (
     <section
       ref={sceneRef}
-      className="relative h-[220vh] w-full rounded-[28px] bg-[#B4CBBC]"
+      className="relative h-[340vh] w-full rounded-[28px] bg-[#9D98C3]"
     >
       <div ref={stageRef} className="sticky top-0 h-[100vh] relative">
         {/* WebGL particles */}
@@ -191,21 +278,32 @@ export default function HeroChipsToButton(): React.ReactElement {
         <OrganicParticlesGL
           stageRef={stageRef as React.RefObject<HTMLDivElement>}
           headlineRef={headlineRef as any}
-          chipRects={chips.map((c, i) => {
-            const el = chipRefs.current[c.id];
+          chipRects={((): Array<{ id: string; rect: DOMRect; color: string }> => {
+            // Reorder GL gating to match group sequencing and headline timing
+            const orderIds = [
+              // Group 1
+              "banking", "personal", "payments",
+              // Group 2
+              "expense", "accounting", "company",
+              // Group 3
+              "capital", "insights",
+            ];
             const stageRect = stageRef.current?.getBoundingClientRect();
-            const r = el?.getBoundingClientRect();
-            let rect = new DOMRect(0,0,0,0);
-            if (r && stageRect) {
-              rect = new DOMRect(
-                r.left - stageRect.left,
-                r.top - stageRect.top,
-                r.width,
-                r.height
-              );
-            }
-            return { id: c.id, rect, color: colorsRef.current[i % colorsRef.current.length] };
-          })}
+            return orderIds.map((id, i) => {
+              const el = chipRefs.current[id];
+              const r = el?.getBoundingClientRect();
+              let rect = new DOMRect(0, 0, 0, 0);
+              if (r && stageRect) {
+                rect = new DOMRect(
+                  r.left - stageRect.left,
+                  r.top - stageRect.top,
+                  r.width,
+                  r.height
+                );
+              }
+              return { id, rect, color: colorsRef.current[i % colorsRef.current.length] };
+            }).filter((c) => c.rect.width > 0 && c.rect.height > 0);
+          })()}
           ctaRect={ctaState}
           progress={progress}
         />)}
@@ -217,9 +315,20 @@ export default function HeroChipsToButton(): React.ReactElement {
         <h1
           data-hero-headline
           ref={headlineRef}
-          className="text-balance text-5xl font-semibold leading-tight text-zinc-900 md:text-7xl"
+          className="relative text-balance leading-tight text-zinc-900 text-[36px] arcadia-display"
         >
-          With all your money moves in one place, momentum comes standard.
+          {/* Layout keeper to preserve width/height for CTA measurement */}
+          <span className="block invisible select-none">Greater than the sum of its parts</span>
+          {headlineLines.map((text, idx) => (
+            <span
+              key={idx}
+              ref={(el) => { lineRefs.current[idx] = el; }}
+              className="absolute inset-0 flex items-center justify-center will-change-opacity text-center pointer-events-none"
+              style={{ opacity: idx === 0 ? 1 : 0 }}
+            >
+              {text}
+            </span>
+          ))}
         </h1>
 
         {/* Floating chips placed around headline */}
@@ -301,7 +410,7 @@ function CTAOverlay({
     >
       <a
         href="#"
-        className="pointer-events-auto inline-flex h-full w-full items-center justify-center rounded-full bg-white/80 px-6 text-sm font-medium text-zinc-900 shadow-sm ring-1 ring-black/10 backdrop-blur hover:bg-white"
+        className="pointer-events-auto inline-flex h-full w-full items-center justify-center rounded-full bg-white/80 px-6 text-zinc-900 shadow-sm ring-1 ring-black/10 backdrop-blur hover:bg-white arcadia-text-17"
       >
         Explore Demo
       </a>
