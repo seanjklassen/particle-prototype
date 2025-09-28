@@ -2,22 +2,20 @@
 
 import React, { useEffect, useMemo, useRef } from "react";
 
-type Vec2 = { x: number; y: number };
+// Removed unused Vec2
 
 export type OrganicParticlesGLProps = {
   stageRef: React.RefObject<HTMLDivElement>;
   headlineRef: React.RefObject<HTMLElement>;
-  chipRects: Array<{ id: string; rect: DOMRect; color: string }>; // measured in stage space
+  chipRects: Array<{ id: string; rect: DOMRect }>; // measured in stage space
   ctaRect: { x: number; y: number; w: number; h: number; r: number } | null; // stage space
   progress: number; // 0..1 timeline
-  quality?: "auto" | "low" | "high";
 };
 
 // Minimal, dependency-free WebGL2 instanced particle renderer.
 // This starts as a compact baseline we can expand. It supports ~16k points @60fps.
-export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, ctaRect, progress, quality = "auto" }: OrganicParticlesGLProps) {
+export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, ctaRect, progress }: OrganicParticlesGLProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const glRef = useRef<WebGL2RenderingContext | null>(null);
   const buffersReadyRef = useRef(false);
   const poolRef = useRef(16000); // total particles
   const actorRef = useRef(14000); // portion that participates in morph (brighter/denser)
@@ -96,7 +94,7 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     if (!canvas || !stage) return;
     const gl = canvas.getContext("webgl2", { antialias: false, premultipliedAlpha: true });
     if (!gl) return;
-    glRef.current = gl;
+    // using local gl; no external ref needed
 
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -368,16 +366,8 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     };
   }, [stageRef, ctaTargets, perChipSamples, chipRects]);
 
-  // Fade out GL layer as CTA appears
-  const style: React.CSSProperties = useMemo(() => {
-    const p = progress;
-    const startThresh = 0.002; // hide until user actually starts scrolling
-    const visibleAlpha = p < 0.95 ? 1 : Math.max(0, 1 - (p - 0.95) / 0.05);
-    const alpha = p > startThresh ? visibleAlpha : 0;
-    return { opacity: alpha, transition: 'opacity 120ms linear' };
-  }, [progress]);
-
-  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={style} aria-hidden={style.opacity === 0} />;
+  // Opacity is controlled in the render loop for idle fade; avoid double writers here
+  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" aria-hidden />;
 }
 
 // ========== Shaders ==========
@@ -562,11 +552,7 @@ function tileTo(pool:number, source:Float32Array){
   for(let i=0;i<pool;i++){ const si=(i% (source.length/2))*2; out[i*2]=source[si]; out[i*2+1]=source[si+1]; }
   return out;
 }
-function tileToColors(pool:number, source:Float32Array){
-  const out = new Float32Array(pool*3);
-  for(let i=0;i<pool;i++){ const si=(i% (source.length/3))*3; out[i*3]=source[si]; out[i*3+1]=source[si+1]; out[i*3+2]=source[si+2]; }
-  return out;
-}
+// Removed unused tileToColors
 function buildMixedColors(pool:number, whiteRatio:number){
   const out = new Float32Array(pool*3);
   for(let i=0;i<pool;i++){
@@ -585,8 +571,4 @@ function concatFloat32Colors(a:Float32Array,b:Float32Array){
   out.set(a,0); out.set(b,a.length); return out;
 }
 function rand(a:number,b:number){ return Math.random()*(b-a)+a; }
-function hexToRgb(hex:string){
-  const h = hex.replace('#','');
-  const num = parseInt(h.length===3 ? h.split("").map(ch=>ch+ch).join("") : h, 16);
-  return [(num>>16)&255,(num>>8)&255,num&255];
-}
+// Removed unused hexToRgb
