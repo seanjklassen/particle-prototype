@@ -80,6 +80,7 @@ export default function HeroChipsToButton(): React.ReactElement {
   const [ctaState, setCtaState] = useState<{ x: number; y: number; w: number; h: number; r: number } | null>(null);
   const chipRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const [mounted, setMounted] = useState(false);
+  const ctaVisibleRef = useRef(false);
 
   // Progress is 0..1 based on how much the hero fills the viewport.
   const progress = useScrollProgress(sceneRef as React.MutableRefObject<HTMLElement | null>);
@@ -134,7 +135,6 @@ export default function HeroChipsToButton(): React.ReactElement {
   useEffect(() => {
     if (!mounted) return;
     let raf = 0;
-    let ctaFlourishPlayed = false;
     const explodeStart = TIMELINE.explodeStart;
     const preExplodeFadeLead = TIMELINE.preExplodeFadeLead;
     const hideStart = Math.max(0, explodeStart - preExplodeFadeLead);
@@ -221,12 +221,10 @@ export default function HeroChipsToButton(): React.ReactElement {
         el.setAttribute('aria-hidden', a < 0.01 ? 'true' : 'false');
       }
 
-      // Trigger CTA flourish once as CTA line appears
-      if (!ctaFlourishPlayed && p >= TIMELINE.ctaLineStart) {
-        ctaFlourishPlayed = true;
-        // Light, short flourish: glide up a fifth then tiny chord stack
-        // Base: G4 → D5 glide, then G5 major-ish shades (G5, B5, D6 simplified)
-        // Keep ultra subtle volume
+      // Trigger CTA flourish on each formation (rising edge over threshold)
+      const threshold = TIMELINE.ctaLineStart;
+      const nowVisible = p >= threshold;
+      if (nowVisible && !ctaVisibleRef.current) {
         (async () => {
           try {
             await resumeAudio();
@@ -235,6 +233,7 @@ export default function HeroChipsToButton(): React.ReactElement {
           } catch {}
         })();
       }
+      ctaVisibleRef.current = nowVisible;
 
       raf = requestAnimationFrame(tick);
     };
