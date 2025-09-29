@@ -3,7 +3,7 @@
 import React, {useEffect, useMemo, useRef, useState} from "react";
 import { useScrollProgress } from "@/hooks/useScrollProgress";
 import OrganicParticlesGL from "@/components/OrganicParticlesGL";
-import { playBleep, resumeAudio, playChordStaggered, playGlide } from "@/utils/bleep";
+import { playBleepWithCooldown, resumeAudio, playChordStaggered, playGlide, markFlourishNow } from "@/utils/bleep";
 
 type Chip = {
   id: string;
@@ -50,11 +50,10 @@ export default function HeroChipsToButton(): React.ReactElement {
   const chips: Chip[] = useMemo(() => CHIPS, []);
 
   // Map chips to G Mixolydian notes (G A B C D E F G). 8 chips → include top G.
-  // Frequencies in Hz: G4 392.00, A4 440.00, B4 493.88, C5 523.25,
-  // D5 587.33, E5 659.25, F5 698.46, G5 783.99
+  // One octave lower: G3→G4
   const noteByChipId: Record<string, number> = useMemo(() => {
     const ids = chips.map(c => c.id);
-    const scale = [392.00, 440.00, 493.88, 523.25, 587.33, 659.25, 698.46, 783.99];
+    const scale = [196.00, 220.00, 246.94, 261.63, 293.66, 329.63, 349.23, 392.00];
     const map: Record<string, number> = {};
     for (let i = 0; i < ids.length; i++) {
       map[ids[i]] = scale[i % scale.length];
@@ -228,8 +227,10 @@ export default function HeroChipsToButton(): React.ReactElement {
         (async () => {
           try {
             await resumeAudio();
-            playGlide(392.0, 587.33, 140, 0, 0.02, "square");
-            playChordStaggered([783.99, 987.77, 1174.66], 18, 90, 90, 0.018);
+            if (markFlourishNow()) {
+              playGlide(196.0, 293.66, 180, 0, 0.02, "square");
+              playChordStaggered([392.00, 493.88, 587.33], 18, 90, 120, 0.018);
+            }
           } catch {}
         })();
       }
@@ -259,9 +260,7 @@ export default function HeroChipsToButton(): React.ReactElement {
         try {
           await resumeAudio();
           const freq = noteByChipId[chip.id];
-          if (freq) {
-            playBleep({ frequency: freq });
-          }
+          if (freq) playBleepWithCooldown({ frequency: freq });
         } catch {}
       }}
     >

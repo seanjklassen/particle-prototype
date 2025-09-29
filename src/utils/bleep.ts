@@ -31,7 +31,7 @@ export type BleepOptions = {
 
 export function playBleep({
   frequency,
-  durationMs = 120,
+  durationMs = 160,
   volume = 0.035,
   type = "square",
 }: BleepOptions): void {
@@ -53,9 +53,9 @@ export function playBleep({
 
   // Quick clickless envelope
   const attack = 0.005; // s
-  const decay = 0.06; // s
+  const decay = 0.08; // s
   const sustainLevel = Math.max(1e-4, volume * 0.28);
-  const release = 0.06; // s
+  const release = 0.08; // s
   const dur = Math.max(0.04, durationMs / 1000);
 
   gain.gain.setValueAtTime(0, now);
@@ -78,6 +78,25 @@ export function playBleep({
       gain.disconnect();
     } catch {}
   };
+}
+
+// Simple cooldown helpers (module-level)
+let lastBleepAt = 0;
+let lastFlourishAt = 0;
+const COOLDOWN_MS = 250;
+
+export function playBleepWithCooldown(opts: BleepOptions): void {
+  const now = Date.now();
+  if (now - lastBleepAt < COOLDOWN_MS) return;
+  lastBleepAt = now;
+  playBleep(opts);
+}
+
+export function markFlourishNow(): boolean {
+  const now = Date.now();
+  if (now - lastFlourishAt < COOLDOWN_MS) return false;
+  lastFlourishAt = now;
+  return true;
 }
 
 
