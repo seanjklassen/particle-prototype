@@ -3,6 +3,7 @@
 import React, {useEffect, useMemo, useRef, useState} from "react";
 import { useScrollProgress } from "@/hooks/useScrollProgress";
 import OrganicParticlesGL from "@/components/OrganicParticlesGL";
+import { playBleep, resumeAudio, playChordStaggered, playGlide } from "@/utils/bleep";
 
 type Chip = {
   id: string;
@@ -47,6 +48,19 @@ const TIMELINE = {
  */
 export default function HeroChipsToButton(): React.ReactElement {
   const chips: Chip[] = useMemo(() => CHIPS, []);
+
+  // Map chips to G Mixolydian notes (G A B C D E F G). 8 chips → include top G.
+  // Frequencies in Hz: G4 392.00, A4 440.00, B4 493.88, C5 523.25,
+  // D5 587.33, E5 659.25, F5 698.46, G5 783.99
+  const noteByChipId: Record<string, number> = useMemo(() => {
+    const ids = chips.map(c => c.id);
+    const scale = [392.00, 440.00, 493.88, 523.25, 587.33, 659.25, 698.46, 783.99];
+    const map: Record<string, number> = {};
+    for (let i = 0; i < ids.length; i++) {
+      map[ids[i]] = scale[i % scale.length];
+    }
+    return map;
+  }, [chips]);
 
   // sceneRef = scrollable section; stageRef = sticky viewport-sized stage
   const sceneRef = useRef<HTMLDivElement | null>(null);
@@ -120,6 +134,7 @@ export default function HeroChipsToButton(): React.ReactElement {
   useEffect(() => {
     if (!mounted) return;
     let raf = 0;
+    let ctaFlourishPlayed = false;
     const explodeStart = TIMELINE.explodeStart;
     const preExplodeFadeLead = TIMELINE.preExplodeFadeLead;
     const hideStart = Math.max(0, explodeStart - preExplodeFadeLead);
@@ -173,7 +188,10 @@ export default function HeroChipsToButton(): React.ReactElement {
         let fadeOutFactor = 1;
         if (p <= hideStart) fadeOutFactor = 1; else if (p >= hideEnd) fadeOutFactor = 0; else fadeOutFactor = 1 - easeInOutCubic((p - hideStart) / Math.max(0.0001, hideEnd - hideStart));
         if (p >= explodeStart) fadeOutFactor = 0;
-        el.style.opacity = String(Math.min(alpha, fadeOutFactor));
+        const vis = Math.min(alpha, fadeOutFactor);
+        el.style.opacity = String(vis);
+        // Disable hover/audio when invisible
+        el.style.pointerEvents = vis > 0.05 ? "auto" : "none";
       });
 
       // Headline
@@ -203,6 +221,21 @@ export default function HeroChipsToButton(): React.ReactElement {
         el.setAttribute('aria-hidden', a < 0.01 ? 'true' : 'false');
       }
 
+      // Trigger CTA flourish once as CTA line appears
+      if (!ctaFlourishPlayed && p >= TIMELINE.ctaLineStart) {
+        ctaFlourishPlayed = true;
+        // Light, short flourish: glide up a fifth then tiny chord stack
+        // Base: G4 → D5 glide, then G5 major-ish shades (G5, B5, D6 simplified)
+        // Keep ultra subtle volume
+        (async () => {
+          try {
+            await resumeAudio();
+            playGlide(392.0, 587.33, 140, 0, 0.02, "square");
+            playChordStaggered([783.99, 987.77, 1174.66], 18, 90, 90, 0.018);
+          } catch {}
+        })();
+      }
+
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -216,16 +249,25 @@ export default function HeroChipsToButton(): React.ReactElement {
         chipRefs.current[chip.id] = el;
       }}
       className={
-        "select-none inline-flex items-center gap-2 rounded-full bg-white/70 backdrop-blur px-4 py-2 text-zinc-900 shadow-sm ring-1 ring-black/10 chip-float-a will-change-transform arcadia-text-17 " +
+        "select-none inline-flex items-center gap-2 rounded-full bg-[#3A3831]/90 backdrop-blur px-4 py-2 text-white ring-1 ring-black/10 chip-float-a will-change-transform arcadia-text-17 " +
         className
       }
       style={{
-        boxShadow: "0 1px 0 rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.7)",
+        boxShadow: "none",
         opacity: 0,
       }}
+      onMouseEnter={async () => {
+        try {
+          await resumeAudio();
+          const freq = noteByChipId[chip.id];
+          if (freq) {
+            playBleep({ frequency: freq });
+          }
+        } catch {}
+      }}
     >
-      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900">
-        <span className="block h-2.5 w-2.5 rounded-full bg-white"></span>
+      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/95">
+        <span className="block h-2.5 w-2.5 rounded-full bg-[#3A3831]"></span>
       </span>
       <span className="relative z-10">{chip.label}</span>
     </span>
@@ -234,7 +276,7 @@ export default function HeroChipsToButton(): React.ReactElement {
   return (
     <section
       ref={sceneRef}
-      className="relative h-[340vh] w-full rounded-[28px] bg-[#95A194]"
+      className="relative h-[400vh] w-full rounded-[28px] bg-[#EFEEE9]"
     >
       <div ref={stageRef} className="sticky top-0 h-[100vh] relative">
         {/* WebGL particles */}
@@ -294,30 +336,30 @@ export default function HeroChipsToButton(): React.ReactElement {
         {/* Floating chips placed around headline */}
         <div className="pointer-events-none absolute inset-0">
           {/* top center */}
-          <div className="absolute left-1/2 top-[12%] -translate-x-1/2">
+          <div className="pointer-events-auto absolute left-1/2 top-[12%] -translate-x-1/2">
             <ChipEl chip={chips[0]} className="" />
           </div>
           {/* right upper */}
-          <div className="absolute right-[3%] top-[20%]">
+          <div className="pointer-events-auto absolute right-[3%] top-[20%]">
             <ChipEl chip={chips[1]} className="" />
           </div>
-          <div className="absolute right-[2%] top-[48%]">
+          <div className="pointer-events-auto absolute right-[2%] top-[48%]">
             <ChipEl chip={chips[2]} className="chip-float-b" />
           </div>
           {/* left mid */}
-          <div className="absolute left-[2%] top-[42%]">
+          <div className="pointer-events-auto absolute left-[2%] top-[42%]">
             <ChipEl chip={chips[3]} className="chip-float-b" />
           </div>
-          <div className="absolute left-[18%] top-[63%]">
+          <div className="pointer-events-auto absolute left-[18%] top-[63%]">
             <ChipEl chip={chips[4]} className="" />
           </div>
-          <div className="absolute right-[6%] top-[63%]">
+          <div className="pointer-events-auto absolute right-[6%] top-[63%]">
             <ChipEl chip={chips[5]} className="" />
           </div>
-          <div className="absolute left-[20%] top-[22%]">
+          <div className="pointer-events-auto absolute left-[20%] top-[22%]">
             <ChipEl chip={chips[6]} className="" />
           </div>
-          <div className="absolute left-1/2 top-[78%] -translate-x-1/2">
+          <div className="pointer-events-auto absolute left-1/2 top-[78%] -translate-x-1/2">
             <ChipEl chip={chips[7]} className="" />
           </div>
         </div>
@@ -372,7 +414,7 @@ function CTAOverlay({
         role="button"
         aria-label="Launch demo"
         title="Launch demo"
-        className="pointer-events-auto inline-flex h-full w-full items-center justify-center rounded-full bg-white/80 px-6 text-zinc-900 shadow-sm ring-1 ring-black/10 backdrop-blur hover:bg-white arcadia-text-17"
+        className="pointer-events-auto inline-flex h-full w-full items-center justify-center rounded-full bg-[#3A3831]/95 px-6 text-white ring-1 ring-black/10 backdrop-blur hover:bg-[#3A3831] arcadia-text-17"
       >
         Launch Demo
       </a>

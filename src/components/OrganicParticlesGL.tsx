@@ -177,8 +177,8 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
           const x = Math.random() * stage.clientWidth;
           const y = Math.random() * stage.clientHeight;
           cloudPts.push(x + rand(-1,1), y + rand(-1,1));
-          const isWhite = Math.random() < 0.85;
-          const c = isWhite ? [0.92,0.94,0.96] : [0.10,0.11,0.12];
+          const isWhite = Math.random() < 0.15; // invert: mostly dark
+          const c = isWhite ? [0.92,0.94,0.96] : [0.352,0.333,0.282]; // #5A5548 linear approx
           cloudCols.push(c[0], c[1], c[2]);
         }
         const cloudArr = new Float32Array(cloudPts);
@@ -216,7 +216,7 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       const actTargetsChip = new Float32Array(actors * 2);
       const actTargetsCTA = tileTo(actors, ctaTargets);
       const actStarts = new Float32Array(actors * 2);
-      const actColors  = buildMixedColors(actors, 0.85); // 85% white, 15% dark
+      const actColors  = buildMixedColors(actors, 0.15); // 15% white, 85% dark
       let writeIdx = 0;
       for (let i = 0; i < numChips; i++) {
         const chipT = perChipSamples.targets[i];
@@ -258,8 +258,8 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
         const x = Math.random() * stage.clientWidth;
         const y = Math.random() * stage.clientHeight;
         cloudPts.push(x + rand(-1,1), y + rand(-1,1));
-        const isWhite = Math.random() < 0.85;
-        const c = isWhite ? [0.92,0.94,0.96] : [0.10,0.11,0.12];
+        const isWhite = Math.random() < 0.15; // invert: mostly dark
+        const c = isWhite ? [0.92,0.94,0.96] : [0.352,0.333,0.282]; // #5A5548 linear approx
         cloudCols.push(c[0], c[1], c[2]);
       }
       const cloudArr = new Float32Array(cloudPts);
