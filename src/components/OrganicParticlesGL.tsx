@@ -17,8 +17,8 @@ export type OrganicParticlesGLProps = {
 export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, ctaRect, progress }: OrganicParticlesGLProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const buffersReadyRef = useRef(false);
-  const poolRef = useRef(16000); // total particles
-  const actorRef = useRef(14000); // portion that participates in morph (brighter/denser)
+  const poolRef = useRef(22000); // total particles (increased density)
+  const actorRef = useRef(22000); // all particles participate in morph; no ambient cloud
   const cssSizeRef = useRef<{ w: number; h: number }>({ w: 1, h: 1 });
   const headCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lastProgressRef = useRef(0);
@@ -56,30 +56,43 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     const starts: Float32Array[] = [];
     chipRects.forEach((c) => {
       const r = { x: c.rect.left, y: c.rect.top, w: c.rect.width, h: c.rect.height, r: Math.min(c.rect.height / 2, 18) };
+      const cx = r.x + r.w * 0.5;
+      const cy = r.y + r.h * 0.5;
+      // Slightly shrink radii to emphasize roundness
+      const rx = (r.w * 0.5) * 0.9;
+      const ry = (r.h * 0.5) * 0.9;
+
       const tPts: number[] = [];
       for (let y = r.y + spacingTarget / 2; y <= r.y + r.h - spacingTarget / 2; y += spacingTarget) {
         for (let x = r.x + spacingTarget / 2; x <= r.x + r.w - spacingTarget / 2; x += spacingTarget) {
-          if (insideRoundRect(x, y, r)) {
-            // Add jitter to chip target positions for a looser cluster
-            const j = 1.8;
-            const jx = x + rand(-j, j);
-            const jy = y + rand(-j, j);
-            if (insideRoundRect(jx, jy, r)) {
-              tPts.push(jx, jy);
-            } else {
-              tPts.push(x, y);
-            }
+          // Prefer an elliptical cluster over rounded-rect for a softer shape
+          const j = 2.4; // stronger jitter for looseness
+          const jx = x + rand(-j, j);
+          const jy = y + rand(-j, j);
+          const dx = (jx - cx) / Math.max(1, rx);
+          const dy = (jy - cy) / Math.max(1, ry);
+          const inside = (dx * dx + dy * dy) <= 1.0;
+          if (inside) {
+            // Add subtle radial pull so edges round off further
+            const r2 = Math.max(0.0001, dx * dx + dy * dy);
+            const pull = 0.08 * (1.0 - r2);
+            tPts.push(jx - dx * pull * rx, jy - dy * pull * ry);
           }
         }
       }
-      // Shuffle to avoid scanline ordering artifacts
       shuffleXY(tPts);
       targets.push(new Float32Array(tPts));
 
       const sPts: number[] = [];
       for (let y = r.y + spacingStart / 2; y <= r.y + r.h - spacingStart / 2; y += spacingStart) {
         for (let x = r.x + spacingStart / 2; x <= r.x + r.w - spacingStart / 2; x += spacingStart) {
-          sPts.push(x + rand(-1, 1), y + rand(-1, 1));
+          const jx = x + rand(-1.2, 1.2);
+          const jy = y + rand(-1.2, 1.2);
+          const dx = (jx - cx) / Math.max(1, rx);
+          const dy = (jy - cy) / Math.max(1, ry);
+          if ((dx * dx + dy * dy) <= 1.0) {
+            sPts.push(jx, jy);
+          }
         }
       }
       starts.push(new Float32Array(sPts));
@@ -136,6 +149,10 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     const uTick = gl.getUniformLocation(program, "uTick");
     const uNumChips = gl.getUniformLocation(program, "uNumChips");
     const uHeadCenter = gl.getUniformLocation(program, "uHeadCenter");
+    // Chip burst uniforms (centers and radii)
+    const uChipCenters = gl.getUniformLocation(program, "uChipCenters[0]");
+    const uChipRadii = gl.getUniformLocation(program, "uChipRadii[0]");
+    const uChipCount = gl.getUniformLocation(program, "uChipCount");
     // Grouped chip gating uniforms
     const uGStart = gl.getUniformLocation(program, "uGStart");
     const uGEnd = gl.getUniformLocation(program, "uGEnd");
@@ -161,55 +178,15 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
     const makeKey = () => `${ctaTargets.length}|${perChipSamples.targets.length}|${perChipSamples.starts.length}`;
 
     const fillBuffers = () => {
-      // If targets not ready yet, fill with a pure cloud so something renders
+      // If targets not ready yet, skip filling so nothing ambient renders
       if (!ctaTargets.length || !perChipSamples.targets.length) {
-        const pool = poolRef.current;
-        const stage = stageRef.current!;
-        const stageBox = stage.getBoundingClientRect();
-        const headBox = headlineRef.current?.getBoundingClientRect();
-        const cx = headBox ? (headBox.left - stageBox.left + headBox.width/2) : stage.clientWidth/2;
-        const cy = headBox ? (headBox.top - stageBox.top + headBox.height/2)  : stage.clientHeight/2;
-        headCenterRef.current = { x: cx, y: cy };
-        const cloudPts: number[] = [];
-        const cloudCols: number[] = [];
-        // Full-stage rectangular scatter
-        for(let i=0;i<pool;i++){
-          const x = Math.random() * stage.clientWidth;
-          const y = Math.random() * stage.clientHeight;
-          cloudPts.push(x + rand(-1,1), y + rand(-1,1));
-          const isWhite = Math.random() < 0.15; // invert: mostly dark
-          const c = isWhite ? [0.92,0.94,0.96] : [0.352,0.333,0.282]; // #5A5548 linear approx
-          cloudCols.push(c[0], c[1], c[2]);
-        }
-        const cloudArr = new Float32Array(cloudPts);
-        const cloudColsArr = new Float32Array(cloudCols);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, startBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, cloudArr, gl.STATIC_DRAW);
-        gl.vertexAttribPointer(aStart, 2, gl.FLOAT, false, 0, 0);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, targetChipBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, cloudArr, gl.STATIC_DRAW);
-        gl.vertexAttribPointer(aTargetChip, 2, gl.FLOAT, false, 0, 0);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, targetCtaBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, cloudArr, gl.STATIC_DRAW);
-        gl.vertexAttribPointer(aTargetCTA, 2, gl.FLOAT, false, 0, 0);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, targetCloudBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, cloudArr, gl.STATIC_DRAW);
-        gl.vertexAttribPointer(aTargetCloud, 2, gl.FLOAT, false, 0, 0);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, colorBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, cloudColsArr, gl.STATIC_DRAW);
-        gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
-        buffersReadyRef.current = true;
+        buffersReadyRef.current = false;
         dataKeyRef.current = makeKey();
         return;
       }
       const pool = poolRef.current;
-      const actors = Math.min(actorRef.current, Math.max(1000, Math.floor(pool*0.75)));
-      const cloud = pool - actors;
+      const actors = pool; // render all as actors
+      const cloud = 0; // no ambient cloud instances
       // actors: assign evenly per chip in sequence for gating windows
       const numChips = Math.max(1, perChipSamples.targets.length);
       const actorsPerChip = Math.floor(actors / numChips);
@@ -244,7 +221,7 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
         actStarts[writeIdx * 2 + 1] = chipS[siS + 1];
         writeIdx++;
       }
-      // cloud: full-stage rectangular scatter (use headline center for auxiliary uniforms only)
+      // cloud: still generate a scatter for actor explosion target paths, but render no cloud instances
       const stage = stageRef.current!;
       const stageBox = stage.getBoundingClientRect();
       const headBox = headlineRef.current?.getBoundingClientRect();
@@ -252,25 +229,22 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       const cx = headBox ? (headBox.left - stageBox.left + headBox.width/2) : stage.clientWidth/2;
       const cy = headBox ? (headBox.top - stageBox.top + headBox.height/2)  : stage.clientHeight/2;
       headCenterRef.current = { x: cx, y: cy };
+      // Build a dense scatter equal to actor count for pathing only
       const cloudPts: number[] = [];
-      const cloudCols: number[] = [];
-      for(let i=0;i<cloud;i++){
+      for(let i=0;i<actors;i++){
         const x = Math.random() * stage.clientWidth;
         const y = Math.random() * stage.clientHeight;
         cloudPts.push(x + rand(-1,1), y + rand(-1,1));
-        const isWhite = Math.random() < 0.15; // invert: mostly dark
-        const c = isWhite ? [0.92,0.94,0.96] : [0.352,0.333,0.282]; // #5A5548 linear approx
-        cloudCols.push(c[0], c[1], c[2]);
       }
       const cloudArr = new Float32Array(cloudPts);
-      const cloudColsArr = new Float32Array(cloudCols);
-      const cloudTargets = cloudArr; // cloud stays as cloud (animated in shader)
+      const cloudColsArr = new Float32Array(0);
+      const cloudTargets = new Float32Array(0); // no ambient instances to render
       const actTargetsCloud = tileTo(actors, cloudArr);
-      // stitch actors first then cloud
+      // stitch actors only (no ambient tail)
       const targetsChip = concatFloat32(actTargetsChip, cloudTargets);
       const targetsCTA  = concatFloat32(actTargetsCTA, cloudTargets);
       const targetsCloud = concatFloat32(actTargetsCloud, cloudTargets);
-      const starts  = concatFloat32(actStarts, cloudArr);
+      const starts  = concatFloat32(actStarts, cloudTargets);
       const colors  = concatFloat32Colors(actColors, cloudColsArr);
 
       gl.bindBuffer(gl.ARRAY_BUFFER, startBuf);
@@ -311,14 +285,31 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       if (!buffersReadyRef.current) return;
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
+      // Upload chip burst uniforms (limit to 16)
+      const MAX_CHIPS = 16;
+      const chipCount = Math.min(MAX_CHIPS, chipRects.length);
+      const centersArr = new Float32Array(MAX_CHIPS * 2);
+      const radiiArr = new Float32Array(MAX_CHIPS);
+      for (let i = 0; i < chipCount; i++) {
+        const r = chipRects[i].rect;
+        // chipRects are already in stage coordinates
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        centersArr[i * 2] = cx;
+        centersArr[i * 2 + 1] = cy;
+        radiiArr[i] = Math.min(r.width, r.height) * 0.5;
+      }
+      if (uChipCount) gl.uniform1i(uChipCount, chipCount);
+      if (uChipCenters) gl.uniform2fv(uChipCenters, centersArr);
+      if (uChipRadii) gl.uniform1fv(uChipRadii, radiiArr);
       // Set grouped gating to align with UI chip fade windows: [0.00–0.14], [0.14–0.28], [0.28–0.42]
       if (uGStart) gl.uniform3f(uGStart, 0.00, 0.14, 0.28);
       if (uGEnd) gl.uniform3f(uGEnd, 0.14, 0.28, 0.42);
       // Dynamically match actual chip count to avoid mismatches when rects are not all measured
-      const chipCount = Math.max(0, chipRects.length);
-      const g0 = Math.min(3, chipCount);
-      const g1 = Math.min(3, Math.max(0, chipCount - g0));
-      const g2 = Math.max(0, chipCount - g0 - g1);
+      const chipCountDyn = Math.max(0, chipRects.length);
+      const g0 = Math.min(3, chipCountDyn);
+      const g1 = Math.min(3, Math.max(0, chipCountDyn - g0));
+      const g2 = Math.max(0, chipCountDyn - g0 - g1);
       if (uGCount) gl.uniform3f(uGCount, g0, g1, g2);
       if (uLate) gl.uniform1f(uLate, 0.6);
       gl.uniform1f(uTime, progress);
@@ -389,6 +380,10 @@ uniform vec3 uGStart; // start times for groups 1..3
 uniform vec3 uGEnd;   // end times for groups 1..3
 uniform vec3 uGCount; // counts per group (e.g., 3,3,2)
 uniform float uLate;  // late factor to delay per-chip coalescence inside window
+// Transitionary bursts: up to 16 chip centers/radii
+uniform int uChipCount;
+uniform vec2 uChipCenters[16];
+uniform float uChipRadii[16];
 out vec4 vColor;
 
 // Hash noise
@@ -404,6 +399,8 @@ void main(){
   float t2 = clamp((uT-0.22)/0.63,0.0,1.0);
 
   vec2 pos;
+  // Burst aura needs to be visible to post-branch sizing/color
+  float burstAuraGlobal = 0.0;
   float seed = n2(aStart);
   if (isActor) {
     // Burst from start with mild noise
@@ -411,6 +408,29 @@ void main(){
     vec2 dir = vec2(cos(ang), sin(ang));
     float burst = pow(t1,2.0) * (80.0 + seed*60.0);
     vec2 burstPos = aStart + dir*burst + (seed-0.5)*10.0*t1;
+    // Add short-lived radial burst around the chip center at explosion onset
+    float burstAura = 0.0;
+    float auraMax = 0.0;
+    vec2 auraVec = vec2(0.0);
+    for (int i=0;i<16;i++){
+      if (i>=uChipCount) break;
+      vec2 cc = uChipCenters[i];
+      float r = uChipRadii[i];
+      float d = length(aStart - cc);
+      float within = step(d, r*1.2);
+      float tExplode = clamp((uT - 0.68)/0.10, 0.0, 1.0);
+      // Strong at explosion onset, then decay a bit more slowly for better readability
+      float life = 1.0 - smoothstep(0.0, 0.80, tExplode);
+      float strength = within * life;
+      if (strength > auraMax) {
+        auraMax = strength;
+        vec2 dirC = normalize(aStart - cc + vec2(0.0001, 0.0001));
+        auraVec = dirC * strength;
+      }
+      burstAura = max(burstAura, strength);
+    }
+    burstPos += auraVec * 82.0;
+    burstAuraGlobal = burstAura;
     // Decide phase target (chip first, then CTA, with optional cloud explosion)
     vec2 tChip = aTargetChip;
     vec2 tCTA = aTargetCTA;
@@ -463,7 +483,7 @@ void main(){
     float edgeBias = smoothstep(0.0, 0.6, tChipPhase);
     // Add slight per-frame jitter so clusters look less grid-aligned
     // Chip jitter fades during explosion and CTA phases
-    float chipJamp = 1.9 * (1.0 - tExplode) * (1.0 - tCTAphase);
+    float chipJamp = 2.4 * (1.0 - tExplode) * (1.0 - tCTAphase); // slightly higher jitter for looseness
     vec2 jChip = vec2(sin(uTick*1.31 + seed*4.07), cos(uTick*1.53 + seed*3.71)) * chipJamp;
     vec2 tChipJ = tChip + jChip;
     // CTA jitter is smaller and damps as CTA settles
@@ -492,11 +512,16 @@ void main(){
   ndc.y *= -1.0;
   gl_Position = vec4(ndc, 0.0, 1.0);
 
-  // Size and alpha scale with proximity
+  // Size and alpha scale with proximity; boost size/color briefly during burst aura
   float d = length(aTargetCTA - pos);
   float alpha = clamp(1.0 - d/140.0, 0.85, 1.0);
-  gl_PointSize = 5.2; // larger particles
-  vColor = vec4(aColor, alpha);
+  float aura = burstAuraGlobal;
+  // During burst, points get smaller (sharper), then return to base size
+  gl_PointSize = max(2.4, 5.0 - 3.5 * aura);
+  // High-contrast burst color toward near-black for visibility
+  vec3 burstColor = vec3(0.02, 0.02, 0.03);
+  vec3 col = mix(aColor, burstColor, min(1.0, aura*1.2));
+  vColor = vec4(col, alpha);
 }`;
 
 const FRAG_SRC = `#version 300 es

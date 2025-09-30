@@ -24,11 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {/* Global bottom blur overlay to affect all content */}
-        <div className="pointer-events-none fixed left-0 right-0 bottom-0 h-72 blur-fade-bottom z-[9999]" />
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
       </body>
     </html>

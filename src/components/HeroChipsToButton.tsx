@@ -249,7 +249,7 @@ export default function HeroChipsToButton(): React.ReactElement {
         chipRefs.current[chip.id] = el;
       }}
       className={
-        "select-none inline-flex items-center gap-2 rounded-full bg-[#3A3831]/90 backdrop-blur px-4 py-2 text-white ring-1 ring-black/10 chip-float-a will-change-transform arcadia-text-17 " +
+        "select-none inline-flex items-center gap-2 rounded-full bg-[#3A3831]/90 px-4 py-2 text-white ring-1 ring-black/10 chip-float-a will-change-transform arcadia-text-17 cursor-pointer " +
         className
       }
       style={{
@@ -308,8 +308,7 @@ export default function HeroChipsToButton(): React.ReactElement {
         {/* CTA button positioned where particles coalesce. Rendered relative to stage to avoid container offset */}
         <CTAOverlay progressRef={progressRef} ctaRef={ctaRef} />
 
-        {/* Bottom gradual blur overlay */}
-        <div className="pointer-events-none fixed left-0 right-0 bottom-0 h-64 blur-fade-bottom z-[60]" />
+        {/* Bottom blur overlay removed */}
 
         <div className="relative z-10 mx-auto flex h-full max-w-5xl flex-col items-center justify-center px-6 text-center">
         <h1
@@ -412,7 +411,7 @@ function CTAOverlay({
         role="button"
         aria-label="Launch demo"
         title="Launch demo"
-        className="pointer-events-auto inline-flex h-full w-full items-center justify-center rounded-full bg-[#3A3831]/95 px-6 text-white ring-1 ring-black/10 backdrop-blur hover:bg-[#3A3831] arcadia-text-17"
+        className="pointer-events-auto inline-flex h-full w-full items-center justify-center rounded-full bg-[#3A3831]/95 px-6 text-white ring-1 ring-black/10 hover:bg-[#3A3831] arcadia-text-17 cursor-pointer"
       >
         Launch Demo
       </a>
