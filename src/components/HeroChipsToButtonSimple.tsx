@@ -17,7 +17,7 @@ const CHIPS: Chip[] = [
   { id: "personal", label: "Company cards" },
   { id: "accounting", label: "Accounting automations" },
   { id: "expense", label: "Expense management" },
-  { id: "capital", label: "Capital" },
+  { id: "capital", label: "Treasury" },
   { id: "insights", label: "Insights" },
   { id: "personalBanking", label: "Personal Banking" },
 ];
@@ -259,8 +259,8 @@ export default function HeroChipsToButtonSimple(): React.ReactElement {
               style={{ opacity: 0 }}
             >
               <span>
-                <span className="block whitespace-nowrap">But powered your every move</span>
-                <span className="block whitespace-nowrap">from one place?</span>
+                <span className="block whitespace-nowrap">What if it powered</span>
+                <span className="block whitespace-nowrap">your every move?</span>
               </span>
             </span>
           </h1>
