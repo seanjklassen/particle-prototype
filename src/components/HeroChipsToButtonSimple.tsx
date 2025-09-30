@@ -25,8 +25,8 @@ const CHIPS: Chip[] = [
 const TIMELINE = {
   // In the simple variant, chips begin fading immediately on scroll
   explodeStart: 0.0,
-  // Even snappier fade so it feels like disintegration
-  explodeFade: 0.04,
+  // Shorter fade so chips disintegrate faster
+  explodeFade: 0.025,
   // CTA reveal remains aligned with the GL timeline (mapped below)
   ctaLineStart: 0.92,
 };
@@ -125,7 +125,7 @@ export default function HeroChipsToButtonSimple(): React.ReactElement {
 
         // Fade IN the final line immediately after, finishing before CTA fully forms
         const inS = outE;
-        const inE = Math.max(inS + 0.005, ctaLineStart - 0.01);
+        const inE = Math.max(inS + 0.003, ctaLineStart - 0.02); // faster CTA text in
         let aFinal = 0;
         if (tP <= inS) aFinal = 0; else if (tP >= inE) aFinal = 1; else aFinal = easeInOutCubic((tP - inS) / Math.max(0.0001, inE - inS));
 
@@ -138,8 +138,8 @@ export default function HeroChipsToButtonSimple(): React.ReactElement {
         const el = chipRefs.current[c.id];
         if (!el) return;
         const n = hash01(c.id);
-        // Stronger early-start skew, still synchronized end
-        const startJitter = (n - 0.85) * 0.12; // ~[-0.102 .. +0.018]
+        // Stronger staggered starts per chip, still synchronized end
+        const startJitter = (n - 0.8) * 0.18; // ~[-0.108 .. +0.036]
         const start = Math.max(0, baseStart + startJitter);
         const end = baseEnd;
         const dur = Math.max(0.016, end - start);
@@ -309,7 +309,8 @@ function CTAOverlay({
       const el = containerRef.current;
       if (!el) { rafRef.current = requestAnimationFrame(tick); return; }
       const p = progressRef.current;
-      const t = Math.max(0, Math.min(1, (p - 0.88) / 0.08));
+      // Faster CTA pop window
+      const t = Math.max(0, Math.min(1, (p - 0.915) / 0.035));
       const { x, y, w, h, r } = ctaRef.current;
       el.style.opacity = String(t);
       el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;

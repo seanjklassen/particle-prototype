@@ -51,7 +51,7 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
   // Build per-chip sampled target and start point sets (kept ordered for gating by group)
   const perChipSamples = useMemo(() => {
     const spacingTarget = 5;
-    const spacingStart = 6;
+    const spacingStart = 4;
     const targets: Float32Array[] = [];
     const starts: Float32Array[] = [];
     chipRects.forEach((c) => {
@@ -84,12 +84,15 @@ export default function OrganicParticlesGL({ stageRef, headlineRef, chipRects, c
       targets.push(new Float32Array(tPts));
 
       const sPts: number[] = [];
+      // Much tighter start radius so particles emerge from deep inside chip interior
+      const rxs = rx * 0.55;
+      const rys = ry * 0.55;
       for (let y = r.y + spacingStart / 2; y <= r.y + r.h - spacingStart / 2; y += spacingStart) {
         for (let x = r.x + spacingStart / 2; x <= r.x + r.w - spacingStart / 2; x += spacingStart) {
-          const jx = x + rand(-1.2, 1.2);
-          const jy = y + rand(-1.2, 1.2);
-          const dx = (jx - cx) / Math.max(1, rx);
-          const dy = (jy - cy) / Math.max(1, ry);
+          const jx = x + rand(-0.3, 0.3);
+          const jy = y + rand(-0.3, 0.3);
+          const dx = (jx - cx) / Math.max(1, rxs);
+          const dy = (jy - cy) / Math.max(1, rys);
           if ((dx * dx + dy * dy) <= 1.0) {
             sPts.push(jx, jy);
           }
@@ -452,8 +455,19 @@ void main(){
     else if (chipIndex <= g1endIdx) { gStart = uGStart.y; gEnd = uGEnd.y; }
     // Before a chip group's window starts, bias the initial burst position toward the loose cloud
     // so non-active chip clusters look looser at the very beginning
-    float pre = 1.0 - smoothstep(gStart, gStart + 0.06, uT);
-    burstPos = mix(burstPos, aTargetCloud, pre * 0.85);
+    float pre = 1.0 - smoothstep(gStart, gStart + 0.03, uT);
+    // Greatly reduce pre-cloud bias so particles originate from chip interior
+    burstPos = mix(burstPos, aTargetCloud, pre * 0.25);
+    // Brief inward squeeze toward chip center before the explosion for a stronger emergence feel
+    int idxS = int(chipIndex);
+    if (idxS < uChipCount) {
+      vec2 ccS = uChipCenters[idxS];
+      // Start squeeze earlier and sustain longer
+      float tS = clamp((uT - 0.60)/0.28, 0.0, 1.0);
+      float squeeze = 1.0 - smoothstep(0.0, 1.0, tS);
+      // Stronger pull toward chip center
+      burstPos = mix(burstPos, ccS, 0.70 * squeeze);
+    }
     // Local progress with per-chip staggering inside its group's window
     float groupIndex = chipIndex;
     if (chipIndex > g0endIdx) groupIndex = chipIndex - g0count; // normalize to group-local index
@@ -493,10 +507,38 @@ void main(){
 
     vec2 tgtChip = mix(burstPos, tChipJ, tChipPhaseIdle);
     // During explosion, move from chip back toward cloud; diminish explosion as CTA phase grows
-    float explodeFactor = tExplode * (1.0 - 0.6 * tCTAphase);
+    float explodeFactor = tExplode * (1.0 - 0.35 * tCTAphase);
     vec2 chipToCloud = mix(tgtChip, tCloud, explodeFactor);
-    // Then from exploded cloud to CTA formation
-    vec2 tgt = mix(chipToCloud, tCTAJ, tCTAphase);
+    // Curved CTA approach: quadratic bezier toward CTA with stronger, distance-aware arc
+    vec2 p0 = chipToCloud;
+    vec2 p2 = tCTAJ;
+    vec2 dirPath = normalize(p2 - p0 + vec2(0.0001));
+    vec2 perpPath = vec2(-dirPath.y, dirPath.x);
+    float side = (fract(seed*997.0) < 0.5) ? -1.0 : 1.0;
+    float baseAmp = 120.0 + 60.0 * fract(seed*131.0);
+    float pathLen = length(p2 - p0);
+    // Fade curvature as CTA settles; stronger earlier, scale with distance
+    float amp = (baseAmp + 0.18 * pathLen) * (1.0 - smoothstep(0.0, 0.92, tCTAphase));
+    // Slight bias along the path and a tiny wave for murmuration feel
+    float midBias = 0.10 * side;
+    float wave = sin(tCTAphase*6.2831853 + seed*5.13) * 0.25;
+    vec2 control = mix(p0, p2, clamp(0.5 + midBias, 0.25, 0.75)) + perpPath * (amp * side * (1.0 + 0.25*wave));
+    // Per-particle speed variance along CTA phase for flock-like stagger
+    float speedJitter = 0.9 + 0.25 * fract(seed*271.0);
+    float tt = clamp(pow(tCTAphase, 0.6) * speedJitter, 0.0, 1.0);
+    vec2 qa = mix(p0, control, tt);
+    vec2 qb = mix(control, p2, tt);
+    vec2 curvedCTA = mix(qa, qb, tt);
+    // Add subtle flow-field drift orthogonal to the path for murmuration texture
+    float flowK = 0.012;
+    float flow = sin((p0.x + p0.y)*flowK + uTick*0.9 + seed*5.3);
+    curvedCTA += perpPath * (flow * (0.25*amp));
+    // Pre-CTA swirl around headline to add coherence before alignment
+    vec2 toHead = normalize(p0 - uHeadCenter + vec2(0.0001));
+    vec2 tang = vec2(-toHead.y, toHead.x);
+    curvedCTA += tang * (1.0 - tCTAphase) * (18.0 + 12.0*fract(seed*613.0)) * sin(uTick*0.6 + seed*7.1);
+    // Then from exploded cloud to curved CTA formation
+    vec2 tgt = curvedCTA;
     pos = mix(burstPos, tgt, max(max(tChipPhaseIdle, tExplode), tCTAphase));
     pos += normalize(vec2(0.0001,0.0001) + (tgt - pos)) * (1.0-edgeBias) * 2.0;
   } else {
