@@ -239,20 +239,29 @@ export default function HeroChipsToButtonSimple(): React.ReactElement {
             ref={headlineRef}
             className="relative text-balance leading-tight text-zinc-900 text-[36px] arcadia-display"
           >
-            <span className="block invisible select-none">Greater than the sum of its parts</span>
+            <span className="block invisible select-none">
+              <span className="block whitespace-nowrap">What if banking did more</span>
+              <span className="block whitespace-nowrap">than hold your money?</span>
+            </span>
             <span
               ref={headLineStartRef}
               className="absolute inset-0 flex items-center justify-center text-center"
               style={{ opacity: 1 }}
             >
-              One financial platform
+              <span>
+                <span className="block whitespace-nowrap">What if banking did more</span>
+                <span className="block whitespace-nowrap">than hold your money?</span>
+              </span>
             </span>
             <span
               ref={headLineFinalRef}
               className="absolute inset-0 flex items-center justify-center text-center"
               style={{ opacity: 0 }}
             >
-              Greater than the sum of its parts
+              <span>
+                <span className="block whitespace-nowrap">But powered your every move</span>
+                <span className="block whitespace-nowrap">from one place?</span>
+              </span>
             </span>
           </h1>
 
